@@ -1,5 +1,6 @@
 #!/bin/bash
 
+source ../../../devel/setup.bash
 echo "remap the device serial port(ttyUSBX) to  laser"
 echo "ls01d usb cp210x connection as /dev/laser , check it using the command : ls -l /dev|grep ttyUSB"
 echo "start copy laser.rules to  /etc/udev/rules.d/"
