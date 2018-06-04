@@ -4,6 +4,7 @@
 #include "std_msgs/String.h"
 #include "sensor_msgs/LaserScan.h"
 #include "uart_driver.h"
+#include <ls01d/LaserRanges.h>
 using namespace std;
 
 bool is_scan_stop = false;
@@ -105,6 +106,48 @@ void publish_scan(ros::Publisher *pub, double *dist, double *intensities, int co
 	pub->publish(scan_msg);
 }
 
+void publish_scan2(ros::Publisher *pub, double *dist, double *intensities, int count, ros::Time start, double scan_time)
+{
+	static int scan_count = 0;
+	ls01d::LaserRanges scan_msg;
+	scan_msg.header.stamp = start;
+	scan_msg.header.frame_id = laser_link;
+	scan_count++;
+	// scan_msg.angle_min = (angle_disable_min < 0) ? 0 : angle_disable_min;
+	// scan_msg.angle_max = (angle_disable_max < 0) ? 2 * M_PI : angle_disable_max;
+	scan_msg.range_min = 0.1;
+	scan_msg.range_max = 10.0;
+	double deg2rad = 2 * M_PI / 360; 
+
+	scan_msg.intensities.resize(count);
+	scan_msg.ranges.resize(count);
+	scan_msg.angles.resize(count);
+
+	for (int i = count - 1; i >= 0; i--)
+	{
+		if((i >= angle_disable_min) && (i < angle_disable_max))		// disable angle part
+		{
+			if (min_as_zero)
+				scan_msg.ranges[i] = 0.0;
+			else
+				scan_msg.ranges[i] = std::numeric_limits<float>::infinity();
+		}
+		else if(dist[count - i - 1] == 0.0 && zero_as_max)
+			scan_msg.ranges[i] = scan_msg.range_max - 0.2;
+		else if(dist[count - i - 1] == 0.0)
+			if (min_as_zero)
+				scan_msg.ranges[i] = 0.0;
+			else
+				scan_msg.ranges[i] = std::numeric_limits<float>::infinity();
+		else
+			scan_msg.ranges[i] = dist[count - i - 1] / 1000.0;
+
+		scan_msg.angles[i] = deg2rad * i;
+		scan_msg.intensities[i] = floor(intensities[count - i - 1]);
+	}
+	pub->publish(scan_msg);
+}
+
 void startStopCB(const std_msgs::Int32ConstPtr msg)
 {
 	Command cmd = (Command) msg->data;
@@ -162,11 +205,11 @@ int main(int argv, char **argc)
 	ros::param::get("~zero_as_max", zero_as_max);
 	ros::param::get("~min_as_zero", min_as_zero);
 	ros::param::get("~inverted", inverted);
-	ros::Publisher scan_pub = n.advertise<sensor_msgs::LaserScan>(scan_topic, 1000);
+	ros::Publisher scan_pub = n.advertise<sensor_msgs::LaserScan>(scan_topic, 20);
+	ros::Publisher scan_pub2 = n.advertise<ls01d::LaserRanges>(scan_topic, 20);
 	ros::Subscriber stop_sub = n.subscribe<std_msgs::Int32>("startOrStop", 10, startStopCB);
-
-
-	int ret = driver.OpenSerial(port.c_str(), B230400);
+	int ret;
+	ret = driver.OpenSerial(port.c_str(), B230400);
 	if (ret < 0)
 	{
 		ROS_ERROR("could not open port:%s", port.c_str());
@@ -215,12 +258,13 @@ int main(int argv, char **argc)
 		ends = ros::Time::now();
 		float scan_duration = (ends - starts).toSec() * 1e-3;
 		publish_scan(&scan_pub, data, data_intensity, ret, starts, scan_duration);
+		// publish_scan2(&scan_pub2, data, data_intensity, ret, starts, scan_duration);
 		starts = ends;
 	}
+	printf("Keyboard Interrupt, ls01d stop!");
 	driver.StopScan(STOP_DATA);
 	driver.StopScan(STOP_MOTOR);
 	driver.CloseSerial();
-	ROS_INFO("Keyboard Interrupt, ls01d stop!");
 
 	return 0;
 }
